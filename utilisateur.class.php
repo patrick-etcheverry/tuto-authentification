@@ -7,7 +7,9 @@ require_once 'config_bd.php'; // Import de la constante TABLE_USERS
  * Classe Utilisateur
  *
  * Cette classe représente un utilisateur de l'application et fournit des méthodes
- * pour gérer l'inscription et l'authentification.
+ * pour gérer l'inscription et l'authentification. Elle constitue une version de base
+ * permettant de comprendre les fondamentaux du processus d'inscription et d'authentification
+ * mais avec des défauts (à éviter en production).
  */
 class Utilisateur
 {
@@ -86,17 +88,23 @@ class Utilisateur
         // Exécution de la requête avec l'email de l'utilisateur
         $requete->execute(['email' => $this->getEmail()]);
 
-        // Récupération des informations de l'utilisateur en base
-        $utilisateurEnBase = $requete->fetch();
+        /* Récupération des informations de l'utilisateur en base de données
+           On récupère ici un tableau associatif contenant les champs et valeurs de la BD : 
+           $donneesUtilisateurEnBase['identifiant'] : l'identifiant unique de l'utilisateur
+           $donneesUtilisateurEnBase['email'] : l'email stocké en base pour l'utilisateur
+           $donneesUtilisateurEnBase['password'] : le mot de passe stocké en base pour l'utilisateur */
+        $donneesUtilisateurEnBase = $requete->fetch(PDO::FETCH_ASSOC);
 
         // Vérifie si l'utilisateur en base existe
-        if ($utilisateurEnBase)
+        if ($donneesUtilisateurEnBase)
         {
             // Vérifie si le mot de passe fourni correspond à celui stocké en base
-            if ($utilisateurEnBase->password === $this->getPassword())
+            if ($donneesUtilisateurEnBase['password'] === $this->getPassword())
             {
-                // Synchronise l'identifiant de l'utilisateur en base avec l'instance courante
-                $this->identifiant = $utilisateurEnBase->identifiant;
+                // Synchronise l'identifiant récupéré de la base de données avec l'objet courant.
+                // Cette synchronisation permettra d'utiliser l'identifiant dans d'autres fonctionnalités
+                // (comme la mémorisation de l'utilisateur connecté en session ou la gestion des droits).
+                $this->identifiant = $donneesUtilisateurEnBase['identifiant'];
 
                 // Authentification réussie
                 return true;
