@@ -19,6 +19,11 @@ class Utilisateur
     /**
      * Constructeur
      *
+     * Le constructeur ne prend en paramètre que l'email et le mot de passe
+     * car on construit l'utilisateur au moment de l'authentification (qu'elle
+     * soit réussie ou non) et à ce stade on ne dispose que de ces deux
+     * informations.
+     * 
      * @param string $email Adresse email de l'utilisateur
      * @param string $password Mot de passe de l'utilisateur
      */
