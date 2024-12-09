@@ -6,15 +6,14 @@ require_once 'bd.class.php';
  * Classe Utilisateur
  *
  * Cette classe représente un utilisateur de l'application et fournit des méthodes
- * pour gérer l'inscription et l'authentification. Elle constitue une version de base
- * permettant de comprendre les fondamentaux du processus d'inscription et d'authentification
- * mais avec des défauts (à éviter en production).
+ * pour gérer l'inscription et l'authentification.
+ * Cette version introduit un contrôle de la robustesse des mots de passe.
  */
 class Utilisateur
 {
     private ?int $identifiant = null; // Identifiant unique de l'utilisateur en BD
-    private string $email;           // email utilisé pour identifier l'utilisateur lors de l'inscription et de l'authentification
-    private string $password;        // Mot de passe de l'utilisateur
+    private string $email;           // Adresse email de l'utilisateur
+    private string $password;        // Mot de passe en clair fourni lors de la création
 
     /**
      * Constructeur
@@ -34,16 +33,84 @@ class Utilisateur
     }
 
     /**
+     * Vérifie si un email existe déjà en base.
+     *
+     * @return bool true si l'email existe, false sinon.
+     */
+    public function emailExiste(): bool
+    {
+        // Connexion à la base de données
+        $baseDeDonnees = BD::getInstancePdo();
+
+        // Préparation de la requête pour vérifier si l'email existe
+        $requete = $baseDeDonnees->prepare(
+            'SELECT COUNT(*) FROM utilisateurs WHERE email = :email'
+        );
+
+        // Exécution de la requête avec l'email récupéré au niveau du formulaire
+        $requete->execute(['email' => $this->email]);
+
+        // Retourne vrai si un utilisateur avec cet email existe, faux sinon
+        return $requete->fetchColumn() > 0;
+    }
+
+    /**
+     * Vérifie si un mot de passe est robuste.
+     *
+     * Critères de robustesse :
+     * - Longueur minimale de 8 caractères.
+     * - Contient au moins une lettre majuscule (A-Z).
+     * - Contient au moins une lettre minuscule (a-z).
+     * - Contient au moins un chiffre (0-9).
+     * - Contient au moins un caractère spécial (@$!%*?&).
+     *
+     * @param string $password Le mot de passe à valider.
+     * @return bool true si le mot de passe respecte les critères, false sinon.
+     */
+    public function estRobuste(string $password): bool
+    {
+        $regex = '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/';
+
+        // La fonction preg_match retourne 1 si une correspondance est trouvée.
+        return preg_match($regex, $password) === 1;
+    }
+
+    /**
      * Inscription
      *
      * Enregistre un nouvel utilisateur dans la base de données.
      *
+     * - Vérifie si l'email est déjà utilisé en base via `emailExiste()`.
+     *   Si l'email existe, une exception avec l'identifiant `compte_existant` est levée.
+     * 
+     * - Vérifie si le mot de passe est suffisamment robuste via `estRobuste()`.
+     *   Si ce n'est pas le cas, une exception avec l'identifiant `mdp_faible` est levée.
+     * 
+     * - Le mot de passe est haché avec `password_hash()` (qui inclut un sel aléatoire automatiquement)
+     *   avant d'être inséré en base de données.
+     *
+     * @throws Exception Si l'email existe déjà en base ou si le mot de passe est invalide.
      * @throws PDOException En cas d'erreur lors de l'exécution de la requête.
      */
     public function inscription(): void
     {
+        // Vérifie si le mot de passe est robuste
+        if (!$this->estRobuste($this->password))
+        {
+            throw new Exception("mdp_faible");
+        }
+
+        // Vérifie si l'email existe déjà
+        if ($this->emailExiste())
+        {
+            throw new Exception("compte_existant");
+        }
+
         // Obtention de l'instance PDO via la classe BD
         $baseDeDonnees = BD::getInstancePdo();
+
+        // Hachage du mot de passe avec password_hash()
+        $passwordHache = password_hash($this->password, PASSWORD_BCRYPT);
 
         // Préparation de la requête d'insertion
         $requete = $baseDeDonnees->prepare(
@@ -52,34 +119,19 @@ class Utilisateur
 
         // Exécution de la requête avec les données de l'utilisateur
         $requete->execute([
-            'email' => $this->getEmail(),
-            'password' => $this->getPassword()
+            'email' => $this->email,
+            'password' => $passwordHache
         ]);
     }
 
     /**
-     * @brief Authentifie un utilisateur.
+     * Authentifie un utilisateur.
      *
-     * @details
-     * Cette méthode tente d'authentifier un utilisateur en comparant les informations
-     * fournies dans le formulaire avec celles enregistrées en base de données.
-     * 
-     * Étapes :
-     * 1. Lorsqu'un utilisateur saisit son identifiant (email) et son mot de passe dans le formulaire, 
-     *    un objet de la classe `Utilisateur` est construit pour le représenter. Cet objet est appelé
-     *    "objet courant" et contient les données saisies par l'utilisateur.
-     * 2. La méthode recherche en base de données un utilisateur correspondant à l'email fourni.
-     * 3. Si un utilisateur correspondant est trouvé, son mot de passe stocké en base est récupéré.
-     *    On compare alors ce mot de passe avec celui fourni par l'objet courant.
-     * 4. Si les deux mots de passe correspondent, l'authentification réussit, et l'identifiant
-     *    de l'utilisateur enregistré en base est synchronisé avec l'objet courant.
-     * 
-     * Cette méthode illustre l'importance de séparer la recherche de l'utilisateur (basée uniquement 
-     * sur l'email) de la validation du mot de passe.
-     * 
+     * Cette méthode tente de récupérer un utilisateur en base à partir de son email
+     * et compare le mot de passe fourni avec celui haché en base via `password_verify()`.
+     *
      * @return bool true si l'authentification réussit, false sinon.
      */
-
     public function authentification(): bool
     {
         // Connexion à la base de données
@@ -91,32 +143,27 @@ class Utilisateur
         );
 
         // Exécution de la requête avec l'email de l'utilisateur
-        $requete->execute(['email' => $this->getEmail()]);
+        $requete->execute(['email' => $this->email]);
 
-        /* Récupération des informations de l'utilisateur en base de données
-           On récupère ici un tableau associatif contenant les champs et valeurs de la BD : 
-           $donneesUtilisateurEnBase['identifiant'] : l'identifiant unique de l'utilisateur
-           $donneesUtilisateurEnBase['password'] : le mot de passe stocké en base pour l'utilisateur */
-        $donneesUtilisateurEnBase = $requete->fetch(PDO::FETCH_ASSOC);
+        // Récupération des informations de l'utilisateur en base
+        $utilisateurEnBase = $requete->fetch();
 
         // Vérifie si l'utilisateur en base existe
-        if ($donneesUtilisateurEnBase)
+        if ($utilisateurEnBase)
         {
-            // Vérifie si le mot de passe fourni correspond à celui stocké en base
-            if ($donneesUtilisateurEnBase['password'] === $this->getPassword())
+            // Utilise password_verify() pour comparer le mot de passe saisi et celui en base
+            if (password_verify($this->password, $utilisateurEnBase['password']))
             {
-                // Synchronise l'identifiant récupéré de la base de données avec l'objet courant.
-                // Cette synchronisation permettra d'utiliser l'identifiant dans d'autres fonctionnalités
-                // (comme la mémorisation de l'utilisateur connecté en session ou la gestion des droits).
-                $this->identifiant = $donneesUtilisateurEnBase['identifiant'];
+                $this->identifiant = $utilisateurEnBase['identifiant'];
 
-                // Authentification réussie
-                return true;
+                // Réinitialisation du mot de passe en clair pour ne pas conserver de données sensibles
+                $this->password = '';
+
+                return true; // Authentification réussie
             }
         }
 
-        // Authentification échouée
-        return false;
+        return false; // Authentification échouée
     }
 
     /**
@@ -139,13 +186,22 @@ class Utilisateur
         return $this->email;
     }
 
+
     /**
      * Getter pour le mot de passe
-     *
-     * @return string Mot de passe de l'utilisateur.
      */
-    public function getPassword(): string
-    {
-        return $this->password;
-    }
+    // Nous avons supprimé le getter pour le mot de passe afin d'adopter une gestion conforme 
+    // aux standards actuels de sécurité. Cette suppression repose sur plusieurs principes clés :
+    // 
+    // 1. Respect des bonnes pratiques : Une fois le mot de passe haché, l'application n'a plus besoin de stocker 
+    //    ni de manipuler le mot de passe en clair. Toutes les opérations de vérification utilisent uniquement 
+    //    la version hachée du mot de passe.
+    // 
+    // 2. Réduction de la surface d'attaque : En supprimant le getter, on empêche toute partie du code ou un attaquant 
+    //    exploitant une faille d'accéder au mot de passe en clair. Cela réduit le risque de compromission en cas 
+    //    de fuite ou d'erreur de programmation.
+    // 
+    // 3. Approche "zéro connaissance" : Le mot de passe original reste exclusivement connu de l'utilisateur. 
+    //    L'application ne le conserve jamais après sa vérification initiale, ce qui protège les utilisateurs même 
+    //    en cas de faille ou de vol de données.
 }
