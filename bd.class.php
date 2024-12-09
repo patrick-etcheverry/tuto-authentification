@@ -1,7 +1,7 @@
 <?php
 
 // Import des paramètre de la BD
-require_once 'config_bd.php';
+require_once 'config_app.php';
 
 /**
  * Classe BD
